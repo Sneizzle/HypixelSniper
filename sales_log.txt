@@ -1,1 +1,1 @@
-Timestamp,Item Name,Buy Price,Sell Price,Profit2025-05-22 14:17:24,Spooky Cupcake,80000,105000,25000
+Timestamp,Item Name,Buy Price,Sell Price,Profit
