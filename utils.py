@@ -143,7 +143,8 @@ def main_menu() -> None:
         print("4. ⚙️ Scanner Config")
         print("5. 📃 Log an Auction")
         print("6. 💰 Mark as Sold")
-        print("7. ❌ Exit\n")
+        print("7. ✏️ Log Custom Sale")
+        print("8. ❌ Exit\n")
 
         choice = input("Select an option: ").strip()
 
@@ -160,7 +161,8 @@ def main_menu() -> None:
         elif choice == "4": configure_scanner()
         elif choice == "5": log_auction_listing(record_auction)
         elif choice == "6": mark_auction_as_sold()
-        elif choice == "7":
+        elif choice == "7": log_custom_sale()        # ← new line
+        elif choice == "8":
             print("Goodbye!")
             time.sleep(1)
             break
@@ -266,33 +268,52 @@ def show_portfolio() -> None:
         return
 
     for _, row in combined.iterrows():
-        date_lbl = (row["Timestamp"].strftime('%Y-%m-%d %H:%M')
-                    if pd.notnull(row["Timestamp"]) else "Unknown Date")
+        date_lbl = (
+            row["Timestamp"].strftime('%Y-%m-%d %H:%M')
+            if pd.notnull(row["Timestamp"]) else "Unknown Date"
+        )
         print(f"{Fore.YELLOW}{date_lbl} — {row['Item Name']}")
 
+        # ── Buy price ───────────────────────────────────────────────────────────
         if pd.notnull(row.get("Snipe Price")):
-            print(f"  Bought for: {format_price(int(row['Snipe Price']))}")
+            buy_price_val = int(row["Snipe Price"])
+            print(f"  Bought for: {format_price(buy_price_val)}")
         elif pd.notnull(row.get("Listed Price")):
-            print(f"  Bought for: {format_price(int(row['Listed Price']))}")
+            buy_price_val = int(row["Listed Price"])
+            print(f"  Bought for: {format_price(buy_price_val)}")
         else:
-            print(f"  Bought for: Unknown")
+            buy_price_val = None
+            print("  Bought for: Unknown")
 
+        # ── BIN info (only from snipes) ─────────────────────────────────────────
         if pd.notnull(row.get("Suggested BIN")):
             print(f"  Suggested BIN: {format_price(int(row['Suggested BIN']))}")
             print(f"  2nd Lowest BIN: {format_price(int(row['Second Lowest BIN']))}")
 
+        # ── Listed price (manual auction logger) ───────────────────────────────
         if pd.notnull(row.get("Listed Price")):
             print(f"  Listed Price: {format_price(int(row['Listed Price']))}")
 
+        # ── Sold / Profit ──────────────────────────────────────────────────────
         if row.get("Sold") == "Yes" and pd.notnull(row.get("Sell Price")):
-            expected = (int(row["Suggested BIN"] - row["Snipe Price"])
-                        if pd.notnull(row.get("Suggested BIN")) and pd.notnull(row.get("Snipe Price"))
-                        else None)
-            actual = int(row["Sell Price"] - (row.get("Snipe Price") or row.get("Listed Price")))
-            print(f"  SOLD FOR: {Fore.GREEN}{format_price(int(row['Sell Price']))}{Style.RESET_ALL}")
-            if expected is not None:
-                print(f"  Expected Profit: {Fore.YELLOW}{format_price(expected)}")
-            print(f"  Actual Profit:   {Fore.GREEN}{format_price(actual)}")
+            sell_price_val = int(row["Sell Price"])
+
+            expected_profit = (
+                int(row["Suggested BIN"] - row["Snipe Price"])
+                if pd.notnull(row.get("Suggested BIN")) and pd.notnull(row.get("Snipe Price"))
+                else None
+            )
+
+            actual_profit = (
+                sell_price_val - buy_price_val
+                if buy_price_val is not None else None
+            )
+
+            print(f"  SOLD FOR: {Fore.GREEN}{format_price(sell_price_val)}{Style.RESET_ALL}")
+            if expected_profit is not None:
+                print(f"  Expected Profit: {Fore.YELLOW}{format_price(expected_profit)}")
+            if actual_profit is not None:
+                print(f"  Actual Profit:   {Fore.GREEN}{format_price(actual_profit)}")
         else:
             print(f"{Fore.CYAN}  Not yet sold")
 
@@ -349,6 +370,45 @@ def mark_auction_as_sold() -> None:
     print(f"[✔] Marked {sel['Item Name']} as sold for {sold_price:,}")
     input("\nPress Enter to return...")
 
+
+def log_custom_sale():
+    """
+    User sold something while the app was closed.  Ask for item/buy/sell and
+    create *both* an auction row (Sold=Yes) and a sale row so the portfolio
+    merges correctly.
+    """
+    from sell_tracker import record_auction, record_sale   # lazy import
+
+    clear()
+    print(f"{Fore.YELLOW}✏️  Log Custom Sale")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    item_name   = input("Item name: ").strip()
+    if not item_name:
+        print("Cancelled.")
+        time.sleep(1)
+        return
+
+    buy_price   = parse_human_input(input("Buy price (what you paid): ").strip())
+    sell_price  = parse_human_input(input("Sell price (what you got): ").strip())
+    if buy_price <= 0 or sell_price <= 0:
+        print("Invalid numbers.")
+        time.sleep(1)
+        return
+
+    # 1️⃣  Add a row to auctions_log.txt *already marked as sold*
+    record_auction(item_name, buy_price)          # creates Sold = "No"
+    # Patch last row to Sold="Yes"
+    import pandas as pd
+    df = pd.read_csv(AUCTIONS_LOG)
+    df.loc[df.index[-1], "Sold"] = "Yes"
+    df.to_csv(AUCTIONS_LOG, index=False)
+
+    # 2️⃣  Add a row to sales_log.txt
+    record_sale(item_name, buy_price, sell_price)
+
+    print(f"\n[✔] Logged custom sale for {item_name}.")
+    time.sleep(1.5)
 
 def configure_scanner() -> None:
     while True:
